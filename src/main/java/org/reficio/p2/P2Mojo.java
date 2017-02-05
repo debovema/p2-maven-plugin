@@ -18,10 +18,18 @@
  */
 package org.reficio.p2;
 
-import com.google.common.base.Preconditions;
-import com.google.common.collect.ArrayListMultimap;
-import com.google.common.collect.Multimap;
-import com.google.common.collect.Sets;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Properties;
+import java.util.Set;
+
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
@@ -31,7 +39,11 @@ import org.apache.maven.plugin.AbstractMojoExecutionException;
 import org.apache.maven.plugin.BuildPluginManager;
 import org.apache.maven.plugin.MojoExecutionException;
 import org.apache.maven.plugin.logging.Log;
-import org.apache.maven.plugins.annotations.*;
+import org.apache.maven.plugins.annotations.Component;
+import org.apache.maven.plugins.annotations.LifecyclePhase;
+import org.apache.maven.plugins.annotations.Mojo;
+import org.apache.maven.plugins.annotations.Parameter;
+import org.apache.maven.plugins.annotations.ResolutionScope;
 import org.apache.maven.project.MavenProject;
 import org.codehaus.plexus.PlexusConstants;
 import org.codehaus.plexus.PlexusContainer;
@@ -58,13 +70,12 @@ import org.reficio.p2.resolver.maven.ResolvedArtifact;
 import org.reficio.p2.resolver.maven.impl.AetherResolver;
 import org.reficio.p2.utils.JarUtils;
 
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Set;
+import com.google.common.base.Preconditions;
+import com.google.common.collect.ArrayListMultimap;
+import com.google.common.collect.Multimap;
+import com.google.common.collect.Sets;
+
+import edu.emory.mathcs.backport.java.util.Arrays;
 
 /**
  * Main plugin class
@@ -190,6 +201,30 @@ public class P2Mojo extends AbstractMojo implements Contextualizable {
     @Parameter(readonly = true)
     private List<EclipseArtifact> p2;
 
+    // artifacts checksum parameters
+    /**
+     * Whether to generate a checksum of all declared artifacts before executing this goal.
+     * The checksum will be output to a "p2.hash" file.
+     * It can be used to skip this goal if the generated checksum is the same as the one in the file.
+     */
+    @Parameter(property="p2.artifactsChecksum.generate", required = true, defaultValue = "false")
+    private boolean artifactsChecksumGenerate;
+
+    /**
+     * Whether to skip this goal when the generated checksum is the same as the one in the "p2.hash" file.
+     */
+    @Parameter(property="p2.artifactsChecksum.skipIfEqual", required = true, defaultValue = "true")
+    private boolean artifactsChecksumSkipIfEqual;
+
+    /**
+     * The dependencies checksum file.
+     */
+    @Parameter(property="p2.artifactsChecksum", required = true, defaultValue = "${project.basedir}/p2.hash")
+    private File artifactsChecksum;
+
+	private String artifactsChecksumHash = null;
+	private static final String artifactsChecksumHashKey = "artifactsHash";
+
     /**
      * Logger retrieved from the Maven internals.
      * It's the recommended way to do it...
@@ -215,18 +250,98 @@ public class P2Mojo extends AbstractMojo implements Contextualizable {
         try {
             initializeEnvironment();
             initializeRepositorySystem();
+            if (checkForHash()) {
+            	getLog().info("Skipping execution because the p2 site was already generated for this set of declared artifacts");
+            	return;
+            }
             processArtifacts();
             processFeatures();
             processEclipseArtifacts();
             executeP2PublisherPlugin();
             executeCategoryPublisher();
             cleanupEnvironment();
+            saveHash();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
 
-    private void initializeEnvironment() throws IOException {
+	private String computeHashForArtifacts() {
+    	List<Integer> artifactsHashes = new ArrayList<Integer>();
+    	for (P2Artifact p2Artifact : artifacts) {
+    		artifactsHashes.add(p2Artifact.getHash());
+		}
+    	Integer finalHash = Arrays.hashCode(artifactsHashes.toArray(new Integer[0]));
+
+    	return finalHash.toString();
+    }
+
+    private boolean checkForHash() {
+    	if (!artifactsChecksumGenerate) {
+    		// build will not generate a hash so it is not possible to check
+    		return false;
+    	}
+    	// generate the dependencies checksum
+    	this.artifactsChecksumHash = computeHashForArtifacts();
+
+    	// skip if equal and file exists : let's check
+		if (artifactsChecksumSkipIfEqual && artifactsChecksum != null && artifactsChecksum.exists()) {
+			Properties prop = new Properties();
+			InputStream input = null;
+
+			try {
+				input = new FileInputStream(artifactsChecksum);
+				prop.load(input);
+
+				String hash = prop.getProperty(artifactsChecksumHashKey);
+				if (hash != null) {
+					if (StringUtils.equals(hash, this.artifactsChecksumHash)) {
+						return true;
+					}
+				}
+			} catch (IOException ex) {
+				ex.printStackTrace();
+			} finally {
+				if (input != null) {
+					try {
+						input.close();
+					} catch (IOException e) {
+						e.printStackTrace();
+					}
+				}
+			}
+		}
+
+		return false;
+	}
+
+    private void saveHash() {
+    	if (artifactsChecksum == null || artifactsChecksumGenerate == false || artifactsChecksumHash == null) {
+    		return;
+    	}
+
+    	Properties prop = new Properties();
+		OutputStream output = null;
+		try {
+			output = new FileOutputStream(artifactsChecksum);
+
+			prop.setProperty(artifactsChecksumHashKey, this.artifactsChecksumHash);
+
+			prop.store(output, null);
+		} catch (IOException ex) {
+			ex.printStackTrace();
+		} finally {
+			if (output != null) {
+				try {
+					output.close();
+				} catch (IOException e) {
+					e.printStackTrace();
+				}
+			}
+		}
+	}
+
+	private void initializeEnvironment() throws IOException {
         Logger.initialize(log);
         bundlesDestinationFolder = new File(buildDirectory, BUNDLES_DESTINATION_FOLDER);
         featuresDestinationFolder = new File(buildDirectory, FEATURES_DESTINATION_FOLDER);

@@ -22,6 +22,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /**
  * Represents one &lt;artifact&gt; section in the plugin configuration.
@@ -124,4 +125,7 @@ public class P2Artifact {
         this.excludes = excludes;
     }
 
+    public int getHash() {
+    	return Objects.hash(this.id, this.transitive, this.override, this.source, this.singleton, Objects.hash(this.getExcludes()), Objects.hash(this.getInstructions()));
+    }
 }
