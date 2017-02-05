@@ -29,6 +29,8 @@
 
         <clover.version>3.1.12</clover.version>
         <clover.license>/private/reficio/clover.license</clover.license>
+
+        <mojo-executor.version>2.2.0</mojo-executor.version>
     </properties>
 
     <licenses>
@@ -191,6 +193,11 @@
             <version>${tycho.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.eclipse.tycho</groupId>
+            <artifactId>tycho-p2-repository-plugin</artifactId>
+            <version>${tycho.version}</version>
+        </dependency>
+        <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
             <version>4.11</version>
@@ -223,6 +230,11 @@
             <artifactId>clover</artifactId>
             <version>${clover.version}</version>
         </dependency>
+		<dependency>
+			<groupId>org.twdata.maven</groupId>
+			<artifactId>mojo-executor</artifactId>
+			<version>${mojo-executor.version}</version>
+		</dependency>
     </dependencies>
 
     <build>

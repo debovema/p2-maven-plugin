@@ -18,6 +18,16 @@
  */
 package org.reficio.p2;
 
+import static org.twdata.maven.mojoexecutor.MojoExecutor.artifactId;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.configuration;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.element;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.executeMojo;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.executionEnvironment;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.goal;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.groupId;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.plugin;
+import static org.twdata.maven.mojoexecutor.MojoExecutor.version;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -34,10 +44,12 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.maven.execution.MavenSession;
+import org.apache.maven.model.DeploymentRepository;
 import org.apache.maven.plugin.AbstractMojo;
 import org.apache.maven.plugin.AbstractMojoExecutionException;
 import org.apache.maven.plugin.BuildPluginManager;
 import org.apache.maven.plugin.MojoExecutionException;
+import org.apache.maven.plugin.descriptor.PluginDescriptor;
 import org.apache.maven.plugin.logging.Log;
 import org.apache.maven.plugins.annotations.Component;
 import org.apache.maven.plugins.annotations.LifecyclePhase;
@@ -69,6 +81,8 @@ import org.reficio.p2.resolver.maven.ArtifactResolver;
 import org.reficio.p2.resolver.maven.ResolvedArtifact;
 import org.reficio.p2.resolver.maven.impl.AetherResolver;
 import org.reficio.p2.utils.JarUtils;
+import org.twdata.maven.mojoexecutor.MojoExecutor.Element;
+import org.twdata.maven.mojoexecutor.MojoExecutor.ExecutionEnvironment;
 
 import com.google.common.base.Preconditions;
 import com.google.common.collect.ArrayListMultimap;
@@ -225,6 +239,13 @@ public class P2Mojo extends AbstractMojo implements Contextualizable {
 	private String artifactsChecksumHash = null;
 	private static final String artifactsChecksumHashKey = "artifactsHash";
 
+    // p2 deploy site parameters
+    @Parameter(property="p2.deploySite", required = true, defaultValue = "false")
+	private boolean deployP2Site;
+
+    @Parameter
+    DeploymentRepository deploymentP2Repository;
+
     /**
      * Logger retrieved from the Maven internals.
      * It's the recommended way to do it...
@@ -259,12 +280,86 @@ public class P2Mojo extends AbstractMojo implements Contextualizable {
             processEclipseArtifacts();
             executeP2PublisherPlugin();
             executeCategoryPublisher();
+            deployP2Site();
             cleanupEnvironment();
             saveHash();
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
     }
+
+	private static ExecutionEnvironment environment = null;
+
+	protected ExecutionEnvironment getEnvironment() {
+		return getEnvironment(pluginManager);
+	}
+
+	protected ExecutionEnvironment getEnvironment(BuildPluginManager pluginManager) {
+		if (environment == null) {
+			environment = executionEnvironment(project, session, pluginManager);
+		}
+
+		return environment;
+	}
+
+	private void deployP2Site() throws MojoExecutionException {
+		if (deployP2Site) {
+			getLog().info("Deploying generated p2 site to repository '" + deploymentP2Repository.getId() + "'");
+			if (deploymentP2Repository != null) {
+				String tychoVersion = project.getModel().getProperties().getProperty("tycho.version");
+				if (tychoVersion == null) {
+					tychoVersion = "0.23.1";
+				}
+				PluginDescriptor tychoP2ExtrasPlugin = new PluginDescriptor();
+				tychoP2ExtrasPlugin.setGroupId("org.eclipse.tycho.extras");
+				tychoP2ExtrasPlugin.setArtifactId("tycho-p2-extras-plugin");
+				tychoP2ExtrasPlugin.setVersion(tychoVersion);
+				String tychoP2ExtrasPluginGoal = "publish-features-and-bundles";
+
+				getLog().info("");
+				getLog().info("--- " + tychoP2ExtrasPlugin.getArtifactId() + ":" + tychoP2ExtrasPlugin.getVersion() + ":" + tychoP2ExtrasPluginGoal + " (" + "default-cli" + ") @ " + project.getArtifactId() + " ---");
+				ArrayList<Element> configuration = new ArrayList<Element>();
+				configuration.add(element("compress", "true"));
+
+				executeMojo(
+						plugin(
+							groupId(tychoP2ExtrasPlugin.getGroupId()),
+							artifactId(tychoP2ExtrasPlugin.getArtifactId()),
+							version(tychoP2ExtrasPlugin.getVersion())
+						),
+						goal(tychoP2ExtrasPluginGoal),
+						configuration(
+							configuration.toArray(new Element[0])
+						),
+						getEnvironment(pluginManager)
+					);
+
+				PluginDescriptor tychoP2RepositoryPlugin = new PluginDescriptor();
+				tychoP2RepositoryPlugin.setGroupId("org.eclipse.tycho");
+				tychoP2RepositoryPlugin.setArtifactId("tycho-p2-repository-plugin");
+				tychoP2RepositoryPlugin.setVersion(tychoVersion);
+				String tychoP2RepositoryPluginGoal = "archive-repository";
+
+				getLog().info("");
+				getLog().info("--- " + tychoP2RepositoryPlugin.getArtifactId() + ":" + tychoP2RepositoryPlugin.getVersion() + ":" + tychoP2RepositoryPluginGoal + " (" + "default-cli" + ") @ " + project.getArtifactId() + " ---");
+
+				configuration.clear();
+				configuration.add(element("finalName", "extras"));
+				executeMojo(
+						plugin(
+								groupId(tychoP2RepositoryPlugin.getGroupId()),
+								artifactId(tychoP2RepositoryPlugin.getArtifactId()),
+								version(tychoP2RepositoryPlugin.getVersion())
+								),
+						goal(tychoP2RepositoryPluginGoal),
+						configuration(
+								configuration.toArray(new Element[0])
+								),
+						getEnvironment(pluginManager)
+						);
+			}
+		}
+	}
 
 	private String computeHashForArtifacts() {
     	List<Integer> artifactsHashes = new ArrayList<Integer>();
