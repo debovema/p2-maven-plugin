@@ -191,6 +191,26 @@ public class P2Mojo extends AbstractMojo implements Contextualizable {
     private List<EclipseArtifact> p2;
 
     /**
+     * Whether to generate a checksum of all declared dependencies before executing this goal.
+     * The checksum will be output to a "p2.hash" file.
+     * It can be used to skip this goal if the generated checksum is the same as the one in the file.
+     */
+    @Parameter(property="p2.dependenciesChecksum.generate", required = true, defaultValue = "false")
+    private boolean generateDependenciesChecksum;
+
+    /**
+     * Whether to skip this goal when the generated checksum is the same as the one in the "p2.hash" file.
+     */
+    @Parameter(property="p2.dependenciesChecksum.skipIfEqual", required = true, defaultValue = "true")
+    private boolean checksumSkipIfEqual;
+
+    /**
+     * The dependencies checksum file.
+     */
+    @Parameter(property="p2.dependenciesChecksum", required = true, defaultValue = "${project.basedir}/p2.hash")
+    private File dependenciesChecksum;
+
+    /**
      * Logger retrieved from the Maven internals.
      * It's the recommended way to do it...
      */
